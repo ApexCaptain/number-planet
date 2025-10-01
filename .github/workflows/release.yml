@@ -1,0 +1,136 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        type: choice
+        description: Semantic Versioning Scope
+        options:
+          - major
+          - minor
+          - patch
+        default: patch
+run-name: Build docker image and push to ocir, running by @${{ github.actor }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CI: "true"
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set git identity
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Get previous version
+        id: previousTag
+        run: |
+          tag=$(git tag --sort=v:refname | tail -1)
+          if [ -z "$tag" ]; then
+            echo "tag=0.0.1" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$tag" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: "${{ secrets.WORKFLOW_TOKEN }}"
+
+      - name: Generate next version
+        id: generateNextVersion
+        uses: WyriHaximus/github-action-next-semvers@v1
+        with:
+          version: ${{ steps.previousTag.outputs.tag }}
+
+      - name: Select next version
+        id: selectNextVersion
+        run: |
+          if [ "${{ inputs.version }}" == "major" ]; then
+            echo "next_version=${{ steps.generateNextVersion.outputs.major }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.version }}" == "minor" ]; then
+            echo "next_version=${{ steps.generateNextVersion.outputs.minor }}" >> $GITHUB_OUTPUT
+          else
+            echo "next_version=${{ steps.generateNextVersion.outputs.patch }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        id: docker-buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+          platforms: |
+            linux/amd64
+
+      - name: Load secrets to environment
+        uses: oNaiPs/secrets-to-env-action@v1.5
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Load vars to environment
+        uses: oNaiPs/secrets-to-env-action@v1.5
+        with:
+          secrets: ${{ toJSON(vars) }}
+
+      - name: Get OCIR repo
+        id: get-ocir-repo
+        uses: oracle-actions/get-ocir-repository@v1.3.0
+        with:
+          name: ${{ vars.REPO_NAME }}
+          compartment: ${{ secrets.OCI_COMPARTMENT_OCID }}
+
+      - name: Get OCIR region
+        id: get-ocir-region
+        uses: actions/github-script@v7.0.1
+        env:
+          repo_path: ${{ steps.get-ocir-repo.outputs.repo_path }}
+        with:
+          result-encoding: string
+          script: return `${process.env.repo_path}`.split('.')[0]
+
+      - name: Login to OCIR repo
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ${{ steps.get-ocir-region.outputs.result }}.ocir.io
+          username: ${{ secrets.OCI_TENANCY_NAMESPACE }}/${{ secrets.OCI_CLI_USER_NAME }}
+          password: ${{ secrets.OCI_AUTH_TOKEN }}
+
+      - name: Build Container image and push
+        uses: docker/build-push-action@v6.7.0
+        with:
+          push: true
+          context: .                       
+          file: ./Dockerfile   
+          platforms: |
+            linux/amd64
+          tags: ${{ steps.get-ocir-repo.outputs.repo_path }}:${{ steps.selectNextVersion.outputs.next_version }},${{ steps.get-ocir-repo.outputs.repo_path }}:latest
+          builder: ${{ steps.docker-buildx.outputs.name }}
+    
+      - name: Create new milestone
+        uses: WyriHaximus/github-action-create-milestone@v1
+        with:
+            title: ${{ steps.selectNextVersion.outputs.next_version }}
+        env:
+            GITHUB_TOKEN: "${{ secrets.WORKFLOW_TOKEN }}"
+  
+      - name: Release to GitHub
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
+        with:
+            tag_name: ${{ steps.selectNextVersion.outputs.next_version }}
+            release_name: New Version Release v${{ steps.selectNextVersion.outputs.next_version }}
+            draft: false
+            prerelease: false

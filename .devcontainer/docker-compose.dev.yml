@@ -1,0 +1,20 @@
+services:
+  workspace:
+    container_name: number_planet_devcon_workspace
+    # Base On Ubuntu Noble
+    image: mcr.microsoft.com/devcontainers/base:dev-noble
+    environment:
+      TZ: 'Asia/Seoul'
+      DIR_PATHS_TO_CHANGE_OWNER: ${CONTAINER_NODE_MODULES_DIR_PATH}
+      NODE_ENV: local
+      IS_DEV_CONTAINER: true
+    env_file:
+      - .env
+    command: sleep infinity
+    volumes:
+      # Workspace Cache
+      - ..:${containerWorkspaceFolder}:cached
+      - Number_Planet-node_modules:${CONTAINER_NODE_MODULES_DIR_PATH}
+
+volumes:
+  Number_Planet-node_modules:
