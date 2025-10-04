@@ -73,6 +73,7 @@ jobs:
             network=host
           platforms: |
             linux/arm64
+            linux/amd64
 
       - name: Load secrets to environment
         uses: oNaiPs/secrets-to-env-action@v1.5
@@ -115,6 +116,7 @@ jobs:
           file: ./Dockerfile   
           platforms: |
             linux/arm64
+            linux/amd64
           tags: ${{ steps.get-ocir-repo.outputs.repo_path }}:${{ steps.selectNextVersion.outputs.next_version }},${{ steps.get-ocir-repo.outputs.repo_path }}:latest
           builder: ${{ steps.docker-buildx.outputs.name }}
     
